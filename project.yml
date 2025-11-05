@@ -1,23 +1,18 @@
 ---
-# gaming-server Ceedling Project Configuration
-# Ceedling test framework for gaming-server
+# Ceedling 1.0.1 Configuration for gaming-server
+# 修正版本 - 支持 cJSON 库
 
 :project:
+  :name: gaming-server
+  :build_root: build/
   :use_exceptions: FALSE
-  :use_test_preprocessor: TRUE
-  :use_auxiliary_dependencies: TRUE
-  :build_root: build
-  :release_build: FALSE
-  :test_file_prefix: test_
-  :which_ceedling: gem
-  :ceedling_version: 0.31.1
-  :default_tasks:
-    - test:all
+  :use_mocks: TRUE
+  :compile_threads: 4
+  :test_threads: 4
 
-:environment:
-
-:extension:
-  :executable: .out
+:release_build:
+  :output: gaming-server.out
+  :use_assembly: FALSE
 
 :paths:
   :test:
@@ -30,13 +25,40 @@
     - ../gaming-core/src/**
   :support:
     - tests/support
+  :libraries: []
+
+:files:
+  :test: []
+  :source: []
 
 :defines:
-  # 在測試時定義 TESTING 宏
+  :common: &common_defines
+    - USE_HAL
   :test:
+    - *common_defines
+    - TEST
     - TESTING
-  :source:
+    - UNITY_INCLUDE_DOUBLE
+    - UNITY_DOUBLE_VERBOSE
+  :test_preprocess:
+    - *common_defines
+    - TEST
     - TESTING
+    - UNITY_INCLUDE_DOUBLE
+    - UNITY_DOUBLE_VERBOSE
+
+:flags:
+  :test:
+    :compile:
+      :*:
+        - -std=c99
+        - -Wall
+        - -Wextra
+        - -Werror
+        - -Wno-unused-parameter
+    :link:
+      :*: 
+        - -lcjson  # 添加 cJSON 库链接
 
 :cmock:
   :mock_prefix: mock_
@@ -45,134 +67,62 @@
   :plugins:
     - :ignore
     - :callback
+    - :return_thru_ptr
   :treat_as:
     uint8:    HEX8
     uint16:   HEX16
-    uint32:   UINT32
+    uint32:   HEX32
     int8:     INT8
     bool:     UINT8
+    uint8_t:  HEX8
+    uint16_t: HEX16
+    uint32_t: HEX32
+  :treat_as_void:
+    - cec_event_callback_t
+    - ps5_state_callback_t
+    - ws_message_handler_t
+    - ws_client_callback_t
+    - server_state_callback_t
+    - server_error_callback_t
+  :callback_include_count: TRUE
+  :callback_after_arg_check: FALSE
 
 :gcov:
+  :utilities:
+    - gcovr
   :reports:
     - HtmlDetailed
   :gcovr:
+    :report_root: "."
+    :report_exclude: "^build/|^tests/"
+    :sort_percentage: TRUE
+    :print_summary: TRUE
+    :html_details: TRUE
     :html_medium_threshold: 75
     :html_high_threshold: 90
 
-# 加入 Unity 配置
-:unity:
-  :use_param_tests: TRUE
+# 如果需要生成 XML 报告给 CI
+:xml_tests_report:
+  :artifact_filename: report.xml
 
 :plugins:
-  :load_paths:
-    - "#{Ceedling.load_path}"
   :enabled:
-    - stdout_pretty_tests_report
+    #- stdout_pretty_tests_report
     - module_generator
     - gcov
 
-:flags:
-  :test:
-    :compile:
-      :*:
-        - -Wall
-        - -Wextra
-        - -Wno-unused-parameter
-        - -std=c99
-  :gcov:
-    :compile:
-      :*:
-        - -g
-        - -fprofile-arcs
-        - -ftest-coverage
-    :link:
-      :*:
-        - -fprofile-arcs
-        - -ftest-coverage
+# 环境变量（可选）
+:environment: []
 
+# 如果 cJSON 库不在标准路径，可以添加库路径
 :libraries:
   :placement: :end
-  :flag: "-l${1}"
-  :path_flag: "-L ${1}"
-  :system: []
+  :flag: "${1}"  # 使用 GCC/Clang 风格的链接标志
   :test: []
   :release: []
+  :system:
+    - cjson  # 系统库
 
-# 設定測試 Runner 生成
-:test_runner:
-  :includes:
-    - unity.h
-  :file_suffix: _runner
-
-# 設定工具路徑
-:tools:
-  :test_compiler:
-    :executable: gcc
-    :name: 'GCC Compiler'
-    :arguments:
-      - -I"$": COLLECTION_PATHS_TEST_SUPPORT_SOURCE_INCLUDE_VENDOR
-      - -I"$": COLLECTION_PATHS_TEST_TOOLCHAIN_INCLUDE
-      - -D$: COLLECTION_DEFINES_TEST_AND_VENDOR
-      - -DGCOV_COMPILER
-      - -c ${1}
-      - -o ${2}
-      - -Wall
-      - -Wextra
-      - -Wno-unused-parameter
-      - -std=c99
-      - -g
-  
-  :test_linker:
-    :executable: gcc
-    :name: 'GCC Linker'
-    :arguments:
-      - ${1}
-      - -o ${2}
-      - -lm
-  
-  :gcov_compiler:
-    :executable: gcc
-    :name: 'GCC Coverage Compiler'
-    :arguments:
-      - -I"$": COLLECTION_PATHS_TEST_SUPPORT_SOURCE_INCLUDE_VENDOR
-      - -I"$": COLLECTION_PATHS_TEST_TOOLCHAIN_INCLUDE
-      - -D$: COLLECTION_DEFINES_TEST_AND_VENDOR
-      - -DGCOV_COMPILER
-      - -fprofile-arcs
-      - -ftest-coverage
-      - -c ${1}
-      - -o ${2}
-      - -Wall
-      - -Wextra
-      - -std=c99
-      - -g
-  
-  :gcov_linker:
-    :executable: gcc
-    :name: 'GCC Coverage Linker'
-    :arguments:
-      - -fprofile-arcs
-      - -ftest-coverage
-      - ${1}
-      - -o ${2}
-      - -lm
-
-  :gcov_report:
-    :executable: gcovr
-    :optional: TRUE
-    :arguments:
-      - -r .
-      - -e"vendor/.*"
-      - -e"build/test/.*"
-      - -e"tests/.*"
-      - --html
-      - --html-details
-      - -o build/artifacts/gcov/GcovCoverageResults.html
-
-# 文件生成配置
-:module_generator:
-  :project_root: ./
-  :source_root: src/
-  :test_root: tests/
-
-...
+# Test 前置处理器（如果需要）
+:test_build:
+  :use_assembly: FALSE
