@@ -1,0 +1,100 @@
+
+
+/* tests/test_server_integration_full.c */
+void test_ps5_power_on_detection_flow(void) {
+    printf("\n=== Test: PS5 Power On Detection Flow ===\n");
+    printf("  Initial state: IDLE\n");
+
+    // Step 1: 初始化所有模組（真實順序）
+    cec_monitor_init_IgnoreAndReturn(0);
+    ps5_detector_init_IgnoreAndReturn(0);
+    ps5_wake_init_IgnoreAndReturn(0);
+    server_state_init();  // 你的狀態機 init
+
+    // Step 2: 模擬 CEC 偵測到 PS5 開機
+    printf("  Simulating CEC PS5 power on event...\n");
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_ON);
+
+    // Step 3: 觸發狀態機 tick（模擬主循環）
+    server_state_tick();  // 應該從 IDLE -> DETECTING_PS5
+
+    // Step 4: 網路掃描找到 PS5
+    ps5_info_t ps5_info = {0};
+    safe_strcpy(ps5_info.ip, TEST_PS5_IP, sizeof(ps5_info.ip));
+    ps5_detector_quick_check_IgnoreAndReturn(0);
+
+    server_state_tick();  // 應該轉到 PS5_ONLINE
+
+    // Step 5: 驗證最終狀態 + 統計
+    server_state_t current = server_get_current_state();
+    TEST_ASSERT_EQUAL(PS5_ONLINE, current);
+    TEST_ASSERT_EQUAL(1, stats.cec_power_on_events);
+    TEST_ASSERT_EQUAL(1, stats.network_confirmations);
+
+    printf("  PS5 detected as ONLINE!\n");
+    TEST_PASS_MESSAGE("Full power-on flow test passed!");
+}
+
+void test_ps5_wake_and_verify_flow(void) {
+    printf("\n=== Test: PS5 Wake and Verify Flow ===\n");
+
+    // 模擬按鈕觸發喚醒（或定時喚醒）
+    server_state_init();
+
+    // 假設目前 PS5 是 OFF
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_OFF);
+    ps5_detector_quick_check_IgnoreAndReturn(-1);  // 找不到
+
+    // 觸發喚醒狀態
+    server_trigger_wake_ps5();
+
+    // 模擬 CEC 喚醒成功
+    ps5_wake_by_cec_ExpectAndReturn(0);
+    server_state_tick();
+
+    // 等待開機（模擬延遲）
+    sleep_ms(200);
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_ON);
+    ps5_detector_quick_check_IgnoreAndReturn(0);
+
+    server_state_tick();  // 應該回到 IDLE 或 READY
+
+    TEST_ASSERT_EQUAL(1, stats.wake_attempts);
+    TEST_ASSERT_EQUAL(1, stats.successful_wakes);
+    TEST_PASS_MESSAGE("Wake and verify flow passed!");
+}
+
+void test_cec_failure_fallback_to_network(void) {
+    printf("\n=== Test: CEC Failure -> Network Fallback ===\n");
+
+    server_state_init();
+
+    // CEC 永遠失敗
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_UNKNOWN);
+
+    // 但網路掃描成功
+    ps5_detector_scan_IgnoreAndReturn(0);
+
+    server_state_tick();
+    server_state_tick();
+
+    TEST_ASSERT_EQUAL(PS5_ONLINE, server_get_current_state());
+    TEST_ASSERT_EQUAL(1, stats.fallback_to_network);
+    TEST_PASS_MESSAGE("Fallback mechanism works!");
+}
+
+void test_concurrent_cec_and_network_race(void) {
+    printf("\n=== Test: CEC and Network Race Condition ===\n");
+
+    server_state_init();
+
+    // 兩個事件幾乎同時發生
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_ON);
+    ps5_detector_quick_check_IgnoreAndReturn(0);
+
+    server_state_tick();  // CEC 先到
+    server_state_tick();  // Network 後到（應該不會重複處理）
+
+    TEST_ASSERT_EQUAL(1, stats.ps5_power_events);  // 只記一次！
+    TEST_PASS_MESSAGE("Race condition handled correctly!");
+}

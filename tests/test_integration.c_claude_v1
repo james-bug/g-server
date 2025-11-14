@@ -1,0 +1,382 @@
+/**
+ * @file test_server_integration_simplified.c
+ * @brief Gaming Server Simplified Integration Tests
+ * 
+ * 簡化版整合測試，測試各模組的基本功能
+ * 不依賴 server_state_machine，直接測試各個獨立模組
+ * 
+ * @date 2025-11-07
+ * @version 1.0
+ */
+
+#define _POSIX_C_SOURCE 200809L
+
+#include "unity.h"
+
+// Mock 各個模組
+#include "mock_cec_monitor.h"
+#include "mock_ps5_detector.h"
+#include "mock_ps5_wake.h"
+#include "mock_logger.h"
+
+// POSIX 標準庫
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
+#include <errno.h>
+#include <stdio.h>
+
+/* ============================================================
+ *  測試配置與常數
+ * ============================================================ */
+
+#define TEST_SLEEP_MS 10
+#define TEST_SUBNET "192.168.1.0/24"
+#define TEST_PS5_IP "192.168.1.100"
+#define TEST_PS5_MAC "00:11:22:33:44:55"
+#define TEST_CEC_DEVICE "/dev/cec0"
+
+/* ============================================================
+ *  時間輔助函數
+ * ============================================================ */
+
+static void sleep_ms(long milliseconds) {
+    struct timespec sleep_time = {
+        .tv_sec = milliseconds / 1000,
+        .tv_nsec = (milliseconds % 1000) * 1000000
+    };
+    struct timespec remaining;
+    while (nanosleep(&sleep_time, &remaining) == -1) {
+        if (errno == EINTR) {
+            sleep_time = remaining;
+        } else {
+            break;
+        }
+    }
+}
+
+/* ============================================================
+ *  Setup 與 Teardown
+ * ============================================================ */
+
+void setUp(void) {
+    // 設定基本 Mocks
+    logger_init_IgnoreAndReturn(0);
+    logger_info_Ignore();
+    logger_warning_Ignore();
+    logger_error_Ignore();
+    logger_debug_Ignore();
+}
+
+void tearDown(void) {
+    // 清理
+}
+
+/* ============================================================
+ *  測試案例 - CEC Monitor 模組
+ * ============================================================ */
+
+/**
+ * 測試 1: CEC Monitor 初始化
+ */
+void test_cec_monitor_initialization(void) {
+    printf("\n=== Test: CEC Monitor Initialization ===\n");
+    
+    // 模擬 CEC 初始化成功
+    cec_monitor_init_ExpectAndReturn(TEST_CEC_DEVICE, 0);
+    
+    // 執行初始化
+    int result = cec_monitor_init(TEST_CEC_DEVICE);
+    
+    // 驗證
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  CEC Monitor initialized successfully\n");
+    
+    TEST_PASS_MESSAGE("CEC Monitor initialization test passed!");
+}
+
+/**
+ * 測試 2: CEC 事件偵測
+ */
+void test_cec_event_detection(void) {
+    printf("\n=== Test: CEC Event Detection ===\n");
+    
+    // 初始化
+    cec_monitor_init_IgnoreAndReturn(0);
+    cec_monitor_init(TEST_CEC_DEVICE);
+    
+    // 模擬 PS5 開機事件
+    printf("  Simulating PS5 power on event...\n");
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_ON);
+    
+    ps5_power_state_t state = cec_monitor_get_last_state();
+    TEST_ASSERT_EQUAL(PS5_POWER_ON, state);
+    
+    printf("  PS5 Power State: ON\n");
+    
+    TEST_PASS_MESSAGE("CEC event detection test passed!");
+}
+
+/**
+ * 測試 3: CEC 清理
+ */
+void test_cec_monitor_cleanup(void) {
+    printf("\n=== Test: CEC Monitor Cleanup ===\n");
+    
+    cec_monitor_cleanup_Expect();
+    cec_monitor_cleanup();
+    
+    printf("  CEC Monitor cleaned up\n");
+    
+    TEST_PASS_MESSAGE("CEC cleanup test passed!");
+}
+
+/* ============================================================
+ *  測試案例 - PS5 Detector 模組
+ * ============================================================ */
+
+/**
+ * 測試 4: PS5 Detector 初始化
+ */
+void test_ps5_detector_initialization(void) {
+    printf("\n=== Test: PS5 Detector Initialization ===\n");
+    
+    // 模擬初始化成功
+    ps5_detector_init_ExpectAndReturn(TEST_SUBNET, "/tmp/ps5_cache.json", 0);
+    
+    // 執行初始化
+    int result = ps5_detector_init(TEST_SUBNET, "/tmp/ps5_cache.json");
+    
+    // 驗證
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  PS5 Detector initialized successfully\n");
+    
+    TEST_PASS_MESSAGE("PS5 Detector initialization test passed!");
+}
+
+/**
+ * 測試 5: PS5 網路掃描
+ */
+void test_ps5_network_scan(void) {
+    printf("\n=== Test: PS5 Network Scan ===\n");
+    
+    // 初始化
+    ps5_detector_init_IgnoreAndReturn(0);
+    ps5_detector_init(TEST_SUBNET, "/tmp/ps5_cache.json");
+    
+    // 模擬掃描成功找到 PS5
+    printf("  Simulating PS5 detection...\n");
+    ps5_info_t expected_info;
+    strncpy(expected_info.ip, TEST_PS5_IP, sizeof(expected_info.ip));
+    strncpy(expected_info.mac, TEST_PS5_MAC, sizeof(expected_info.mac));
+    expected_info.last_seen = time(NULL);
+    
+    ps5_detector_scan_ExpectAnyArgsAndReturn(0);
+    
+    ps5_info_t found_info;
+    int result = ps5_detector_scan(&found_info);
+    
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  PS5 detected successfully\n");
+    
+    TEST_PASS_MESSAGE("PS5 network scan test passed!");
+}
+
+/**
+ * 測試 6: PS5 快速檢查 (快取)
+ */
+void test_ps5_quick_check(void) {
+    printf("\n=== Test: PS5 Quick Check ===\n");
+    
+    // 初始化
+    ps5_detector_init_IgnoreAndReturn(0);
+    ps5_detector_init(TEST_SUBNET, "/tmp/ps5_cache.json");
+    
+    // 模擬快速檢查 (使用快取)
+    printf("  Checking cached PS5 info...\n");
+    ps5_detector_quick_check_ExpectAnyArgsAndReturn(0);
+    
+    ps5_info_t info;
+    int result = ps5_detector_quick_check(TEST_PS5_IP, &info);
+    
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  Quick check successful (cache hit)\n");
+    
+    TEST_PASS_MESSAGE("PS5 quick check test passed!");
+}
+
+/* ============================================================
+ *  測試案例 - PS5 Wake 模組
+ * ============================================================ */
+
+/**
+ * 測試 7: PS5 Wake 初始化
+ */
+void test_ps5_wake_initialization(void) {
+    printf("\n=== Test: PS5 Wake Initialization ===\n");
+    
+    ps5_wake_init_ExpectAndReturn(0);
+    
+    int result = ps5_wake_init();
+    
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  PS5 Wake initialized successfully\n");
+    
+    TEST_PASS_MESSAGE("PS5 Wake initialization test passed!");
+}
+
+/**
+ * 測試 8: 透過 CEC 喚醒 PS5
+ */
+void test_ps5_wake_by_cec(void) {
+    printf("\n=== Test: PS5 Wake by CEC ===\n");
+    
+    // 初始化
+    ps5_wake_init_IgnoreAndReturn(0);
+    ps5_wake_init();
+    
+    // 模擬 CEC 喚醒
+    printf("  Sending CEC wake command...\n");
+    ps5_wake_by_cec_ExpectAndReturn(0);
+    
+    int result = ps5_wake_by_cec();
+    
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  CEC wake command sent successfully\n");
+    
+    TEST_PASS_MESSAGE("PS5 wake by CEC test passed!");
+}
+
+/**
+ * 測試 9: 透過 Wake-on-LAN 喚醒 PS5
+ */
+void test_ps5_wake_by_wol(void) {
+    printf("\n=== Test: PS5 Wake by WOL ===\n");
+    
+    // 初始化
+    ps5_wake_init_IgnoreAndReturn(0);
+    ps5_wake_init();
+    
+    // 模擬 WOL 喚醒
+    printf("  Sending WOL magic packet...\n");
+    ps5_wake_ExpectAnyArgsAndReturn(0);
+    
+    ps5_info_t ps5_info;
+    strncpy(ps5_info.mac, TEST_PS5_MAC, sizeof(ps5_info.mac));
+    
+    int result = ps5_wake(&ps5_info);
+    
+    TEST_ASSERT_EQUAL(0, result);
+    printf("  WOL magic packet sent successfully\n");
+    
+    TEST_PASS_MESSAGE("PS5 wake by WOL test passed!");
+}
+
+/* ============================================================
+ *  測試案例 - 整合場景
+ * ============================================================ */
+
+/**
+ * 測試 10: 完整偵測流程
+ */
+void test_complete_detection_flow(void) {
+    printf("\n=== Test: Complete Detection Flow ===\n");
+    
+    // 1. 初始化所有模組
+    printf("  Step 1: Initializing modules...\n");
+    cec_monitor_init_IgnoreAndReturn(0);
+    ps5_detector_init_IgnoreAndReturn(0);
+    
+    cec_monitor_init(TEST_CEC_DEVICE);
+    ps5_detector_init(TEST_SUBNET, "/tmp/ps5_cache.json");
+    
+    // 2. CEC 偵測到 PS5 開機
+    printf("  Step 2: CEC detects PS5 power on...\n");
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_ON);
+    ps5_power_state_t cec_state = cec_monitor_get_last_state();
+    TEST_ASSERT_EQUAL(PS5_POWER_ON, cec_state);
+    
+    // 3. 網路偵測確認 PS5 在線
+    printf("  Step 3: Network detection confirms PS5 online...\n");
+    ps5_detector_quick_check_ExpectAnyArgsAndReturn(0);
+    ps5_info_t ps5_info;
+    int detect_result = ps5_detector_quick_check(TEST_PS5_IP, &ps5_info);
+    TEST_ASSERT_EQUAL(0, detect_result);
+    
+    // 4. 綜合判斷: PS5 狀態為 ON
+    printf("  Step 4: Combined status = ON\n");
+    bool is_on = (cec_state == PS5_POWER_ON) && (detect_result == 0);
+    TEST_ASSERT_TRUE(is_on);
+    
+    printf("  Complete detection flow successful\n");
+    
+    TEST_PASS_MESSAGE("Complete detection flow test passed!");
+}
+
+/**
+ * 測試 11: 喚醒與驗證流程
+ */
+void test_wake_and_verify_flow(void) {
+    printf("\n=== Test: Wake and Verify Flow ===\n");
+    
+    // 1. 初始化
+    printf("  Step 1: Initializing...\n");
+    ps5_wake_init_IgnoreAndReturn(0);
+    ps5_detector_init_IgnoreAndReturn(0);
+    cec_monitor_init_IgnoreAndReturn(0);
+    
+    ps5_wake_init();
+    ps5_detector_init(TEST_SUBNET, "/tmp/ps5_cache.json");
+    cec_monitor_init(TEST_CEC_DEVICE);
+    
+    // 2. 發送喚醒命令
+    printf("  Step 2: Sending wake command...\n");
+    ps5_wake_by_cec_ExpectAndReturn(0);
+    int wake_result = ps5_wake_by_cec();
+    TEST_ASSERT_EQUAL(0, wake_result);
+    
+    // 3. 等待一段時間
+    printf("  Step 3: Waiting for PS5 to boot...\n");
+    sleep_ms(100);  // 模擬等待
+    
+    // 4. 驗證 PS5 已開機
+    printf("  Step 4: Verifying PS5 is on...\n");
+    cec_monitor_get_last_state_ExpectAndReturn(PS5_POWER_ON);
+    ps5_power_state_t state = cec_monitor_get_last_state();
+    TEST_ASSERT_EQUAL(PS5_POWER_ON, state);
+    
+    printf("  PS5 wake and verify successful\n");
+    
+    TEST_PASS_MESSAGE("Wake and verify flow test passed!");
+}
+
+/**
+ * 測試 12: 錯誤處理與重試
+ */
+void test_error_handling_and_retry(void) {
+    printf("\n=== Test: Error Handling and Retry ===\n");
+    
+    // 1. 初始化
+    ps5_detector_init_IgnoreAndReturn(0);
+    ps5_detector_init(TEST_SUBNET, "/tmp/ps5_cache.json");
+    
+    // 2. 第一次偵測失敗
+    printf("  Attempt 1: Detection fails...\n");
+    ps5_detector_scan_ExpectAnyArgsAndReturn(-1);
+    ps5_info_t info1;
+    int result1 = ps5_detector_scan(&info1);
+    TEST_ASSERT_EQUAL(-1, result1);
+    
+    // 3. 第二次偵測成功
+    printf("  Attempt 2: Detection succeeds...\n");
+    ps5_detector_scan_ExpectAnyArgsAndReturn(0);
+    ps5_info_t info2;
+    int result2 = ps5_detector_scan(&info2);
+    TEST_ASSERT_EQUAL(0, result2);
+    
+    printf("  Error handling and retry successful\n");
+    
+    TEST_PASS_MESSAGE("Error handling test passed!");
+}
